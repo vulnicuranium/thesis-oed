@@ -1,0 +1,1 @@
+- Data: Stroebl figshare 25975315 v1, 280 files downloaded 2026-10-15. 279 match figshare MD5; TP_z05_01__47632663.zip has a mismatched figshare MD5 but the correct size and passes unzip -t (accepted).
