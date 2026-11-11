@@ -29,6 +29,8 @@ Notebooks are numbered and must be run in order, because later ones read parquet
 2. `01_metadata.ipynb`: loads `experiments_meta.csv`, strips column whitespace, and builds the `tp_id` test-point key (`type_s<stage>_<sampling>_<tp>`). Confirms 279 cells and 71 test points.
 3. `02_checkup.ipynb`: parses the check-up (`*_CU.csv`, etc.) files read straight out of each cell's zip (no extraction) to get capacity per test. It writes `data/processed/capacity_rpt.parquet`.
 4. `03_eda.ipynb`: reads that parquet and produces the thesis figures in `figs/` (Fig 1 calendar aging, Figs 2 and 2b cycle aging by arm and C-rate, Fig 3 replicate noise). It also computes cumulative throughput (Ah, EFC) from the large `*_ZYK.csv` cycling blocks and attaches it to the table.
+5. `04_calendar_fit.ipynb`: fits the Stage-1 FF calendar model (`src/calendar_model.py`): parametric vs saturated, per-SoC-level effects, SoC-dependent Ea, a cell-level random effect (adaptive Gauss-Hermite marginal likelihood), and Fisher / bootstrap / mixed SEs. Writes Fig 4 and `data/processed/calendar_s1*_boot.npy`.
+6. `05_coverage_sim.ipynb`: summarizes the C2 coverage simulation. The draws come from `cd src && python simulate_coverage.py <reps> <B>`, which writes `data/processed/sim_coverage_soc.parquet`; the notebook only reads it.
 
 ## Data gotchas (hard-won; keep these invariants)
 
