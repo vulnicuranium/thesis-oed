@@ -1,0 +1,5 @@
+[deps]
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+Optim = "429524aa-4258-5aef-a3af-852621145aeb"
+Parquet2 = "98572fba-bba0-415d-956f-fa77e587d26d"
