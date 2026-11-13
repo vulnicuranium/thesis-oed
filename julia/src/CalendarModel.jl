@@ -15,7 +15,7 @@ module CalendarModel
 
 using DataFrames, Parquet2, LinearAlgebra, ForwardDiff, Optim, Random, Statistics
 
-export Design, load_calendar, param_names, fade, fit_nls, fit_mixed, cluster_bootstrap, simulate, subset_rows
+export Design, load_calendar, param_names, fade, fade_saturated, fit_nls, fit_mixed, cluster_bootstrap, simulate, subset_rows
 
 const R_GAS = 8.314462618        # J / (mol K)
 const T_REF = 296.15             # K (23 degC)
@@ -89,10 +89,19 @@ function fade(theta::AbstractVector{T}, D::Design) where {T}
     return out
 end
 
-"""Nonlinear least squares (Levenberg-Marquardt); returns estimate, Fisher (Gauss-Newton) covariance, RSS, n, p."""
-function fit_nls(D::Design, theta0; maxit=200)
+"""Saturated model: one free log rate per condition, shared exponent z. theta = [log_k_cond..., z]."""
+function fade_saturated(theta::AbstractVector{T}, D::Design) where {T}
+    z = theta[end]
+    return [exp(theta[D.cond[i]]) * (D.t[i]^z - D.t0[i]^z) for i in eachindex(D.y)]
+end
+
+"""
+Nonlinear least squares (Levenberg-Marquardt); returns estimate, Fisher (Gauss-Newton) covariance, RSS, n, p.
+`model(theta, D)` gives the predicted fade (default: per-SoC-level model).
+"""
+function fit_nls(D::Design, theta0; maxit=200, model=fade)
     yf = 1 .- D.y
-    res(th) = yf .- fade(th, D)
+    res(th) = yf .- model(th, D)
     th = float.(theta0)
     r = res(th)
     rss = dot(r, r)
@@ -141,14 +150,14 @@ The data are far more informative about b than the prior (likelihood width ~ sig
 nodes are centred at each cell's posterior mode and scaled by its curvature. log sigma and log tau are confined to
 a box by a quadratic penalty so that a degenerate fit (tau -> inf, sigma -> 0) cannot run away.
 """
-function marginal_nll(par, D::Design, x, w)
+function marginal_nll(par, D::Design, x, w, model=fade)
     p = length(par) - 2
     ls, lt = par[p+1], par[p+2]
     pen = 1e4 * (max(0.0, ls - LOG_SIGMA_BOUNDS[2])^2 + max(0.0, LOG_SIGMA_BOUNDS[1] - ls)^2 +
                  max(0.0, lt - LOG_TAU_BOUNDS[2])^2 + max(0.0, LOG_TAU_BOUNDS[1] - lt)^2)
     sigma = exp(clamp(ls, LOG_SIGMA_BOUNDS...))
     tau = exp(clamp(lt, LOG_TAU_BOUNDS...))
-    f = fade(par[1:p], D)
+    f = model(par[1:p], D)
     yf = 1 .- D.y
     nc = length(D.cell_ids)
     n = length(f)
@@ -218,10 +227,10 @@ Nonlinear mixed model with a cell-level random effect on log k (Gaussian noise, 
 
 Returns fixed-effect estimates with inverse-Hessian SEs, sigma, tau, and the maximized log-likelihood.
 """
-function fit_mixed(D::Design, theta0; tau0=0.1, n_gh=15)
+function fit_mixed(D::Design, theta0; tau0=0.1, n_gh=15, model=fade)
     x, w = gauss_hermite(n_gh)
-    f = par -> marginal_nll(par, D, x, w)
-    base = fit_nls(D, theta0)
+    f = par -> marginal_nll(par, D, x, w, model)
+    base = fit_nls(D, theta0; model=model)
     x0 = vcat(base.theta, log(sqrt(base.rss / (base.n - base.p))), log(tau0))
     r1 = optimize(f, x0, BFGS(), Optim.Options(g_abstol=1e-6, iterations=500))
     r2 = optimize(f, Optim.minimizer(r1), NelderMead(), Optim.Options(iterations=5000))
@@ -236,7 +245,7 @@ function fit_mixed(D::Design, theta0; tau0=0.1, n_gh=15)
 end
 
 """Resample cells with replacement within each condition and refit; returns the successful draws as a matrix."""
-function cluster_bootstrap(D::Design, theta_hat, B, rng)
+function cluster_bootstrap(D::Design, theta_hat, B, rng; model=fade)
     rows_by_cell = [Int[] for _ in D.cell_ids]
     for (i, c) in enumerate(D.cell) push!(rows_by_cell[c], i) end
     cells_by_cond = [Int[] for _ in D.conds]
@@ -250,7 +259,7 @@ function cluster_bootstrap(D::Design, theta_hat, B, rng)
             append!(rows, rows_by_cell[rand(rng, cells)])
         end
         try
-            push!(draws, fit_nls(subset_rows(D, rows), theta_hat).theta)
+            push!(draws, fit_nls(subset_rows(D, rows), theta_hat; model=model).theta)
         catch
             continue
         end
@@ -259,9 +268,9 @@ function cluster_bootstrap(D::Design, theta_hat, B, rng)
 end
 
 """Draw cell effects b_c ~ N(0, tau^2) and noise ~ N(0, sigma^2) on the observed design."""
-function simulate(D::Design, theta, sigma, tau, rng)
+function simulate(D::Design, theta, sigma, tau, rng; model=fade)
     b = tau .* randn(rng, length(D.cell_ids))
-    yf = fade(theta, D) .* exp.(b[D.cell])
+    yf = model(theta, D) .* exp.(b[D.cell])
     return with_y(D, 1 .- yf .+ sigma .* randn(rng, length(yf)))
 end
 
